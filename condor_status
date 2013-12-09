@@ -35,7 +35,8 @@ def main():
             'info' : 'The total amount of memory available on compute nodes',
             'values' : {
                 'total' : {
-                    'type' : 'GAUGE',
+                    'label' : 'Total',
+                    'type'  : 'GAUGE',
                     'value' : data['memory']
                 }
             }
@@ -45,13 +46,15 @@ def main():
             'scale' : 'yes',
             'info' : 'The total amount of CPU cores available on compute nodes and the current load',
             'values' : {
-                'total' : {
-                    'type' : 'GAUGE',
-                    'draw' : 'AREA',
+                'cpus' : {
+                    'label' : 'CPUs',
+                    'type'  : 'GAUGE',
+                    'draw'  : 'AREA',
                     'value' : data['cpus']
                 },
                 'load' : {
-                    'type' : 'GAUGE',
+                    'label' : 'Load',
+                    'type'  : 'GAUGE',
                     'value' : data['load']
                 }
             }
@@ -62,6 +65,7 @@ def main():
             'info'   : "Instructions per second (IPS) is a measure of a computer's processor speed.",
             'values' : {
                 'total' : {
+                    'label' : 'IPS',
                     'type'  : 'GAUGE',
                     'value' : data['mips'],
                     'cdef'  : "%s,1000000,*" % data['mips']
@@ -79,7 +83,8 @@ def main():
                        "instructions per second.",
             'values' : {
                 'total' : {
-                    'type' : 'GAUGE',
+                    'label' : 'Flops',
+                    'type'  : 'GAUGE',
                     'value' : data['kflops'],
                     'cdef'  : "%s,1000,*" % data['kflops']
                 }
@@ -89,6 +94,7 @@ def main():
             'title'  : 'Compute nodes',
             'values' : {
                 'total' : {
+                    'label' : 'Nodes',
                     'type' : 'GAUGE',
                     'value' : data['machines']
                 }
