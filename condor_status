@@ -1,0 +1,247 @@
+#!/usr/bin/python
+
+#%# family=auto
+#%# capabilities=autoconf
+
+import subprocess
+import os
+import re
+import sys
+
+def main():
+    data = fetch_data()
+    graph_parameters = ['title','total','order','scale','vlabel','args', \
+                        'category', 'info']
+    field_parameters = ['graph', 'min', 'max', 'draw', 'warning', \
+                        'colour', 'info', 'type', 'negative', 'cdef', 'label']
+
+    graph_defaults = {
+        'category' : 'condor',
+        'args' : '--lower-limit 0 --base 1000',
+        'info' : 'condor_status',
+        'scale'  : 'no'
+    }
+
+    field_defaults = {
+        'min' : 0,
+        'type' : 'DERIVE',
+        'draw' : 'LINE2'
+    }
+
+    aspects = {
+        'condor_memory' : {
+            'title'  : 'Memory',
+            'scale' : 'yes',
+            'info' : 'The total amount of memory available on compute nodes',
+            'values' : {
+                'total' : {
+                    'type' : 'GAUGE',
+                    'value' : data['memory']
+                }
+            }
+        },
+        'condor_cpus' : {
+            'title'  : 'CPU cores',
+            'scale' : 'yes',
+            'info' : 'The total amount of CPU cores available on compute nodes and the current load',
+            'values' : {
+                'total' : {
+                    'type' : 'GAUGE',
+                    'draw' : 'AREA',
+                    'value' : data['cpus']
+                },
+                'load' : {
+                    'type' : 'GAUGE',
+                    'value' : data['load']
+                }
+            }
+        },
+        'condor_mips' : {
+            'title'  : 'Instructions per second',
+            'scale'  : 'yes',
+            'info'   : "Instructions per second (IPS) is a measure of a computer's processor speed.",
+            'values' : {
+                'total' : {
+                    'type'  : 'GAUGE',
+                    'value' : data['mips'],
+                    'cdef'  : "%s,1000000,*" % data['mips']
+                }
+            }
+        },
+        'condor_flops' : {
+            'title'  : 'Floating-point Operations Per Second)',
+            'scale' : 'yes',
+            'info'   : "FLOPS (for FLoating-point Operations Per Second) is " \
+                       "a measure of computer performance, useful in fields " \
+                       "of scientific calculations that make heavy use of " \
+                       "floating-point calculations. For such cases it is " \
+                       "a more accurate measure than the generic " \
+                       "instructions per second.",
+            'values' : {
+                'total' : {
+                    'type' : 'GAUGE',
+                    'value' : data['kflops'],
+                    'cdef'  : "%s,1000,*" % data['kflops']
+                }
+            }
+        },
+        'condor_machines' : {
+            'title'  : 'Compute nodes',
+            'values' : {
+                'total' : {
+                    'type' : 'GAUGE',
+                    'value' : data['machines']
+                }
+            }
+        }
+    }
+
+    if len(sys.argv)>1 and sys.argv[1]=="autoconf":
+        if data:
+            print "yes";
+        else:
+            print "no";
+        sys.exit(0)
+
+    for key in aspects:
+        print "multigraph %s" % key
+        if len(sys.argv)>1 and sys.argv[1]=="config":
+
+            for graph in graph_parameters:
+                if graph in aspects[key]:
+                    print "graph_%s %s" % (graph,aspects[key][graph])
+                elif graph in graph_defaults:
+                    print "graph_%s %s" % (graph,graph_defaults[graph])
+            print
+
+            for field in field_parameters:
+                if 'values' in aspects[key]:
+                    for source in aspects[key]['values']:
+                        if source == 'placeholder':
+                            for user in sorted(data):
+                                value = False
+                                if field in aspects[key]['values'][source]:
+                                    value = str(aspects[key]['values'][source][field])
+                                elif field in field_defaults:
+                                    value = str(field_defaults[field])
+
+                                if field == 'cdef' and value:
+                                    value = re.sub('placeholder', \
+                                        field_name(user), value)
+
+                                if field == 'label':
+                                    value = user
+
+                                if value:
+                                    print "%s.%s %s" % \
+                                        (field_name(user), field, value)
+                        else:
+                            value = False
+                            if field in aspects[key]['values'][source]:
+                                value = str(aspects[key]['values'][source][field])
+                            elif field in field_defaults:
+                                value = str(field_defaults[field])
+
+                            if value:
+                                print "%s.%s %s" % \
+                                    (field_name(source), field, value)
+
+            print
+        
+        if len(sys.argv) == 1:
+            if 'values' in aspects[key]:
+                for source in aspects[key]['values']:
+
+                    if 'type' in aspects[key]['values'][source]:
+                        t = aspects[key]['values'][source]['type']
+                    else:
+                        t = field_defaults['type']
+
+                    if source == 'placeholder':
+                        for user in sorted(data):
+                            value = data[user][key]
+
+                            if t == 'GAUGE':
+                                print "%s.value %f" % \
+                                    (field_name(user), float(value))
+                            else:
+                                print "%s.value %d" % \
+                                    (field_name(user), int(float(value)))
+                    else:
+                        if source in aspects[key]['values']:
+                           if 'value' in aspects[key]['values'][source]:
+                               value = aspects[key]['values'][source]['value']
+
+                               if t == 'GAUGE':
+                                   print "%s.value %f" % \
+                                       (field_name(source), float(value))
+                               else:
+                                   print "%s.value %d" % \
+                                       (field_name(source), int(float(value)))
+            print
+
+def field_name(value):
+    value = re.sub('^[^A-Za-z_]', '_', value)
+    value = re.sub('[^A-Za-z0-9_]', '_', value)
+    value = "_%s" % value
+    value = value[:19]
+    
+    return value
+
+#def order(d, key):
+#    ret = []
+#    for user in sorted(d):
+#        if key in d[user]:
+#            f = field_name(user)
+#            ret.append(f)
+#    return ret
+
+def fetch_data():
+    cmd = ['condor_status', '-autoformat', 'Memory', 'Cpus', 'Mips', 'KFlops', 'LoadAvg', 'Machine']
+    
+    pr = subprocess.Popen(cmd,
+           cwd="/tmp",
+           stdout=subprocess.PIPE,
+           stderr=subprocess.PIPE,
+           shell=False)
+    
+    (out, error) = pr.communicate()
+    ret = pr.returncode
+    
+    values = {}
+    values['memory'] = 0
+    values['cpus'] = 0
+    values['load'] = 0
+    values['machines'] = 0
+    values['mips'] = 0
+    values['kflops'] = 0
+
+    machines = {}
+    if ret == 0:
+        m = re.compile('^(\d+)\s+(\d+)\s+(\d+)\s+(\d+)\s+(\S+)\s+(\S+)$')
+        for line in out.split('\n'):
+            s = m.match(line)
+            if s:
+                values['memory'] += int(s.group(1))
+                values['cpus'] += int(s.group(2))
+                values['mips'] += int(s.group(3))
+                values['kflops'] += int(s.group(4))
+                values['load'] += float(s.group(5))
+
+                machine = s.group(6)
+                if not machine in machines:
+                    machines[machine] = True
+                    values['machines'] += 1
+    else:
+        print error
+        return False
+    
+    return values
+
+#def pretty(value):
+#    m = re.findall('[A-Z][^A-Z]*', value)
+#    return " ".join(m).lower()
+
+if __name__ == '__main__':
+    main()
+

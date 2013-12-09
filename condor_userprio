@@ -1,0 +1,257 @@
+#!/usr/bin/python
+
+#%# family=auto
+#%# capabilities=autoconf
+
+import subprocess
+import os
+import re
+import sys
+
+def main():
+    data = fetch_data()
+    graph_parameters = ['title','total','order','scale','vlabel','args', \
+                        'category', 'info']
+    field_parameters = ['graph', 'min', 'max', 'draw', 'warning', \
+                        'colour', 'info', 'type', 'negative', 'cdef', 'label']
+
+    graph_defaults = {
+        'category' : 'condor',
+        'args' : '--lower-limit 0 --base 1000',
+        'info' : 'condor_userprio',
+        'scale'  : 'no'
+    }
+
+    field_defaults = {
+        'min' : 0,
+        'type' : 'DERIVE',
+        'draw' : 'LINE2'
+    }
+
+    aspects = {
+        'Priority' : {
+            'title'  : 'User priority',
+            'vlabel' : 'lower value = higher priority',
+            'info'   : "The effective priority value of the user, which is " \
+                       "used to calculate the user's share when allocating " \
+                       "resources. A lower value means a higher priority, " \
+                       "and the minimum value (highest priority) is 0.5. The " \
+                       "effective priority is calculated by multiplying the " \
+                       "real priority by the priority factor.",
+            'args'   : '--lower-limit 0.5 --base 1000',
+            'values' : {
+                'placeholder' : {
+                    'type' : 'GAUGE',
+                    'min' : '0.5'
+                }
+            }
+        },
+        'PriorityFactor' : {
+            'title'  : 'User priority factor',
+            'vlabel' : 'Factor (default = 1)',
+            'info'   : "The system administrator can set this value for " \
+                       "each user, thus controlling a user's effective " \
+                       "priority relative to other users. This can be used " \
+                       "to create different classes of users.",
+            'values' : {
+                'placeholder' : {
+                    'type' : 'GAUGE'
+                }
+            }
+        },
+        'AccumulatedUsage' : {
+            'title'  : 'Accumulated resource hours used',
+            'vlabel' : 'Hours',
+            'info'   : "The accumulated number of resource-hours used by " \
+                       "the user since the usage start time.",
+            'scale'  : 'yes',
+            'values' : {
+                'placeholder' : {
+                    'type' : 'GAUGE',
+                    'cdef' : 'placeholder,3600,/'
+                }
+            }
+        },
+        #'WeightedAccumulatedUsage' : {
+        #    'title'  : 'Weighted accumulated resource hours used',
+        #    'vlabel' : 'Hours',
+        #    'scale'  : 'yes',
+        #    'values' : {
+        #        'placeholder' : {
+        #            'type' : 'GAUGE',
+        #            'cdef' : 'placeholder,60,/'
+        #        }
+        #    }
+        #},
+        'ResourcesUsed' : {
+            'title'  : 'Running jobs',
+            'info'   : 'The number of resources currently used.',
+            'total'  : 'total',
+            'values' : {
+                'placeholder' : {
+                    'type' : 'GAUGE'
+                }
+            }
+        },
+        #'WeightedResourcesUsed' : {
+        #    'title'  : 'Weighted running jobs',
+        #    'total'  : 'total',
+        #    'values' : {
+        #        'placeholder' : {
+        #            'type' : 'GAUGE'
+        #        }
+        #    }
+        #},
+    }
+
+    if len(sys.argv)>1 and sys.argv[1]=="autoconf":
+        if data:
+            print "yes";
+        else:
+            print "no";
+        sys.exit(0)
+
+    for key in aspects:
+        print "multigraph %s" % key
+        if len(sys.argv)>1 and sys.argv[1]=="config":
+
+            for graph in graph_parameters:
+                if graph in aspects[key]:
+                    print "graph_%s %s" % (graph,aspects[key][graph])
+                elif graph in graph_defaults:
+                    print "graph_%s %s" % (graph,graph_defaults[graph])
+            print
+
+            for field in field_parameters:
+                if 'values' in aspects[key]:
+                    for source in aspects[key]['values']:
+                        if source == 'placeholder':
+                            for user in sorted(data):
+                                value = False
+                                if field in aspects[key]['values'][source]:
+                                    value = str(aspects[key]['values'][source][field])
+                                elif field in field_defaults:
+                                    value = str(field_defaults[field])
+
+                                if field == 'cdef' and value:
+                                    value = re.sub('placeholder', \
+                                        field_name(user), value)
+
+                                if field == 'label':
+                                    value = user
+
+                                if value:
+                                    print "%s.%s %s" % \
+                                        (field_name(user), field, value)
+                        else:
+                            value = False
+                            if field in aspects[key]['values'][source]:
+                                value = str(aspects[key]['values'][source][field])
+                            elif field in field_defaults:
+                                value = str(field[defaults][field])
+
+                            if value:
+                                print "%s.%s %s" % \
+                                    (field_name(source), field, value)
+
+            print
+        
+        if len(sys.argv) == 1:
+            if 'values' in aspects[key]:
+                for source in aspects[key]['values']:
+
+                    if 'type' in aspects[key]['values'][source]:
+                        t = aspects[key]['values'][source]['type']
+                    else:
+                        t = field_defaults['type']
+
+                    if source == 'placeholder':
+                        for user in sorted(data):
+                            value = data[user][key]
+
+                            if t == 'GAUGE':
+                                print "%s.value %f" % \
+                                    (field_name(user), float(value))
+                            else:
+                                print "%s.value %d" % \
+                                    (field_name(user), int(float(value)))
+                    else:
+                        if source in aspects[key]['values']:
+                           if 'value' in aspects[key]['values'][source]:
+                               value = aspects[key]['values'][source]['value']
+
+                               if t == 'GAUGE':
+                                   print "%s.value %f" % \
+                                       (field_name(source), float(value))
+                               else:
+                                   print "%s.value %d" % \
+                                       (field_name(source), int(float(value)))
+            print
+
+def field_name(value):
+    value = re.sub('^[^A-Za-z_]', '_', value)
+    value = re.sub('[^A-Za-z0-9_]', '_', value)
+    value = "_%s" % value
+    value = value[:19]
+    
+    return value
+
+#def order(d, key):
+#    ret = []
+#    for user in sorted(d):
+#        if key in d[user]:
+#            f = field_name(user)
+#            ret.append(f)
+#    return ret
+
+def fetch_data():
+    cmd = ['condor_userprio', '-long']
+    
+    pr = subprocess.Popen(cmd,
+           cwd="/tmp",
+           stdout=subprocess.PIPE,
+           stderr=subprocess.PIPE,
+           shell=False)
+    
+    (out, error) = pr.communicate()
+    ret = pr.returncode
+    
+    raw = {}
+    if ret == 0:
+        m = re.compile('^(\w+)(\d)\ =\ (\S+)$')
+        for line in out.split('\n'):
+            s = m.match(line)
+            if s:
+                key = s.group(1)
+                userid = s.group(2)
+                value = s.group(3)
+    
+                if not userid in raw: 
+                    raw[userid] = {}
+    
+                raw[userid][key] = value
+    else:
+        print error
+        return False
+    
+    users = {}
+    m = re.compile('^"*([^@]+)@([^"]+)"*$')
+    for userid in raw:
+        name = raw[userid]['Name']
+        u = m.match(name)
+        if u:
+            username = u.group(1)
+            domain = u.group(2)
+            raw[userid]['domain'] = domain
+            users[username] = raw[userid]
+    
+    del raw
+    return users
+
+#def pretty(value):
+#    m = re.findall('[A-Z][^A-Z]*', value)
+#    return " ".join(m).lower()
+
+if __name__ == '__main__':
+    main()
+

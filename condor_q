@@ -1,0 +1,258 @@
+#!/usr/bin/python
+
+#%# family=auto
+#%# capabilities=autoconf
+
+import subprocess
+import os
+import re
+import sys
+
+def main():
+    data = fetch_data()
+    graph_parameters = ['title','total','order','scale','vlabel','args', \
+                        'category', 'info']
+    field_parameters = ['graph', 'min', 'max', 'draw', 'warning', \
+                        'colour', 'info', 'type', 'negative', 'cdef', 'label']
+
+    graph_defaults = {
+        'category' : 'condor',
+        'args' : '--lower-limit 0 --base 1000',
+        'info' : 'condor_status',
+        'scale'  : 'no'
+    }
+
+    field_defaults = {
+        'min' : 0,
+        'type' : 'DERIVE',
+        'draw' : 'LINE2'
+    }
+
+    aspects = {
+        'condor_requestedmemory' : {
+            'title'  : 'Memory requested',
+            'scale' : 'yes',
+            'info' : 'The total amount of memory requested on the compute nodes',
+            'values' : {
+                'total' : {
+                    'type' : 'GAUGE',
+                    'value' : data['requestedmemory']
+                }
+            }
+        },
+        'condor_requestedcpus' : {
+            'title'  : 'CPUs requested',
+            'scale' : 'yes',
+            'info' : 'The total amount of CPU cores requested on the compute nodes',
+            'values' : {
+                'total' : {
+                    'type' : 'GAUGE',
+                    'value' : data['requestedcpus']
+                }
+            }
+        },
+        'condor_jobstatus' : {
+            'title'  : 'Job status',
+            'scale' : 'no',
+            'info' : 'The current status of the jobs in the queue',
+            'values' : {
+                'unexpanded' : {
+                    'label' : 'Unexpanded',
+                    'type' : 'GAUGE',
+                    'value' : data['jobstatus']['unexpanded']
+                },
+                'idle' : {
+                    'label' : 'Idle',
+                    'type' : 'GAUGE',
+                    'value' : data['jobstatus']['idle']
+                },
+                'running' : {
+                    'label' : 'Running',
+                    'type' : 'GAUGE',
+                    'value' : data['jobstatus']['running']
+                },
+                'removed' : {
+                    'label' : 'Removed',
+                    'type' : 'GAUGE',
+                    'value' : data['jobstatus']['removed']
+                },
+                'completed' : {
+                    'label' : 'Completed',
+                    'type' : 'GAUGE',
+                    'value' : data['jobstatus']['completed']
+                },
+                'held' : {
+                    'label' : 'Held',
+                    'type' : 'GAUGE',
+                    'value' : data['jobstatus']['held']
+                },
+                'submission_err' : {
+                    'label' : 'Submission error',
+                    'type' : 'GAUGE',
+                    'value' : data['jobstatus']['submission_err']
+                },
+            }
+        },
+    }
+
+    if len(sys.argv)>1 and sys.argv[1]=="autoconf":
+        if data:
+            print "yes";
+        else:
+            print "no";
+        sys.exit(0)
+
+    for key in aspects:
+        print "multigraph %s" % key
+        if len(sys.argv)>1 and sys.argv[1]=="config":
+
+            for graph in graph_parameters:
+                if graph in aspects[key]:
+                    print "graph_%s %s" % (graph,aspects[key][graph])
+                elif graph in graph_defaults:
+                    print "graph_%s %s" % (graph,graph_defaults[graph])
+            print
+
+            for field in field_parameters:
+                if 'values' in aspects[key]:
+                    for source in aspects[key]['values']:
+                        if source == 'placeholder':
+                            for user in sorted(data):
+                                value = False
+                                if field in aspects[key]['values'][source]:
+                                    value = str(aspects[key]['values'][source][field])
+                                elif field in field_defaults:
+                                    value = str(field_defaults[field])
+
+                                if field == 'cdef' and value:
+                                    value = re.sub('placeholder', \
+                                        field_name(user), value)
+
+                                if field == 'label':
+                                    value = user
+
+                                if value:
+                                    print "%s.%s %s" % \
+                                        (field_name(user), field, value)
+                        else:
+                            value = False
+                            if field in aspects[key]['values'][source]:
+                                value = str(aspects[key]['values'][source][field])
+                            elif field in field_defaults:
+                                value = str(field_defaults[field])
+
+                            if value:
+                                print "%s.%s %s" % \
+                                    (field_name(source), field, value)
+
+            print
+        
+        if len(sys.argv) == 1:
+            if 'values' in aspects[key]:
+                for source in aspects[key]['values']:
+
+                    if 'type' in aspects[key]['values'][source]:
+                        t = aspects[key]['values'][source]['type']
+                    else:
+                        t = field_defaults['type']
+
+                    if source == 'placeholder':
+                        for user in sorted(data):
+                            value = data[user][key]
+
+                            if t == 'GAUGE':
+                                print "%s.value %f" % \
+                                    (field_name(user), float(value))
+                            else:
+                                print "%s.value %d" % \
+                                    (field_name(user), int(float(value)))
+                    else:
+                        if source in aspects[key]['values']:
+                           if 'value' in aspects[key]['values'][source]:
+                               value = aspects[key]['values'][source]['value']
+
+                               if t == 'GAUGE':
+                                   print "%s.value %f" % \
+                                       (field_name(source), float(value))
+                               else:
+                                   print "%s.value %d" % \
+                                       (field_name(source), int(float(value)))
+            print
+
+def field_name(value):
+    value = re.sub('^[^A-Za-z_]', '_', value)
+    value = re.sub('[^A-Za-z0-9_]', '_', value)
+    value = "_%s" % value
+    value = value[:19]
+    
+    return value
+
+#def order(d, key):
+#    ret = []
+#    for user in sorted(d):
+#        if key in d[user]:
+#            f = field_name(user)
+#            ret.append(f)
+#    return ret
+
+def fetch_data():
+    cmd = ['condor_q', '-autoformat', 'RequestMemory', 'JobStatus', 'RequestCpus']
+    
+    pr = subprocess.Popen(cmd,
+           cwd="/tmp",
+           stdout=subprocess.PIPE,
+           stderr=subprocess.PIPE,
+           shell=False)
+    
+    (out, error) = pr.communicate()
+    ret = pr.returncode
+    
+    values = {}
+    values['requestedmemory'] = 0
+    values['requestedcpus'] = 0
+    values['jobstatus'] = {}
+    values['jobstatus']['unexpanded'] = 0
+    values['jobstatus']['idle'] = 0
+    values['jobstatus']['running'] = 0
+    values['jobstatus']['removed'] = 0
+    values['jobstatus']['completed'] = 0
+    values['jobstatus']['held'] = 0
+    values['jobstatus']['submission_err'] = 0
+
+    machines = {}
+    if ret == 0:
+        m = re.compile('^(\d+)\s+(\d+)\s+(\d+)$')
+        for line in out.split('\n'):
+            s = m.match(line)
+            if s:
+                values['requestedmemory'] += int(s.group(1))
+                status = int(s.group(2))
+                if status == 0:
+                    values['jobstatus']['unexpanded'] += 1
+                elif status == 1:
+                    values['jobstatus']['idle'] += 1
+                elif status == 2:
+                    values['jobstatus']['running'] += 1
+                elif status == 3:
+                    values['jobstatus']['removed'] += 1
+                elif status == 4:
+                    values['jobstatus']['completed'] += 1
+                elif status == 5:
+                    values['jobstatus']['held'] += 1
+                elif status == 6:
+                    values['jobstatus']['submission_err'] += 1
+
+                values['requestedcpus'] += int(s.group(3))
+    else:
+        print error
+        return False
+    
+    return values
+
+#def pretty(value):
+#    m = re.findall('[A-Z][^A-Z]*', value)
+#    return " ".join(m).lower()
+
+if __name__ == '__main__':
+    main()
+
