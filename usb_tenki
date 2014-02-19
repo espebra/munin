@@ -1,0 +1,81 @@
+#!/usr/bin/python
+#
+# Author:  Espen Braastad
+# Website: http://braastad.org/
+#
+
+import re
+import os
+import sys
+import subprocess
+
+os.environ["PATH"] += os.pathsep + '/usr/local/bin'
+
+def get_sensors():
+    cmd = ['usbtenkiget', '-l']
+    pr = subprocess.Popen(cmd,
+           stdout=subprocess.PIPE,
+           stderr=subprocess.PIPE,
+           shell=False)
+    (out, error) = pr.communicate()
+    filter = re.compile("Serial:\s+'([^']+)'")
+    if pr.returncode == 0:
+        sensors = []
+        for line in iter(out.splitlines()):
+            m = filter.search(line)
+            if m:
+                serial = m.group(1)
+                sensors.append(serial)
+        return sensors
+    else:
+        return False
+
+def get_temperature(serial):
+    cmd = ['usbtenkiget', '-s', serial]
+    pr = subprocess.Popen(cmd,
+           stdout=subprocess.PIPE,
+           stderr=subprocess.PIPE,
+           shell=False)
+    (out, error) = pr.communicate()
+    out = out.rstrip('\n')
+    filter = re.compile("^[\d\.]+$")
+    if pr.returncode == 255:
+        if filter.match(out):
+            return out
+    return "U"
+
+def main():
+
+    sensors = get_sensors()
+    if len(sys.argv)>1 :
+        if sys.argv[1]=="autoconf":
+            if len(sensors) > 0:
+                print 'yes (%d sensors found)' % (len(sensors))
+            else:
+                print 'no (sensors not found)'
+            sys.exit(0)
+        elif sys.argv[1]=="config":
+            for sensor in sensors:
+                #units = sensors[sensor]['units']
+                #sensor_type = sensors[sensor]['type']
+                units = "Celcius"
+                sensor_type = "Temperature"
+                print 'multigraph sensor_%s' % sensor
+                print 'graph_title Sensor %s' % sensor
+                print 'graph_args --base 1000'
+                print 'graph_category sensors'
+                print 'graph_vlabel %s' % units
+                print 'output.label %s' % sensor_type
+                print 'output.type GAUGE'
+                print 'output.draw LINE1'
+                print ''
+
+    else:
+        for sensor in sensors:
+            print 'multigraph sensor_%s' % sensor
+            print 'output.value %s' % (get_temperature(sensor))
+            print ''
+
+if __name__ == '__main__':
+    main()
+
