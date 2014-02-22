@@ -38,10 +38,8 @@ def get_temperature(serial):
            shell=False)
     (out, error) = pr.communicate()
     out = out.rstrip('\n')
-    filter = re.compile("^[\d\.]+$")
     if pr.returncode == 255:
-        if filter.match(out):
-            return out
+        return out
     return "U"
 
 def main():
